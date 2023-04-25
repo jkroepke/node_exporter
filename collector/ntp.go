@@ -35,15 +35,15 @@ const (
 )
 
 var (
-	ntpServer          = kingpin.Flag("collector.ntp.server", "NTP server to use for ntp collector").Default("127.0.0.1").String()
-	ntpServerPort      = kingpin.Flag("collector.ntp.server-port", "UDP port number to connect to on NTP server").Default("123").Int()
-	ntpProtocolVersion = kingpin.Flag("collector.ntp.protocol-version", "NTP protocol version").Default("4").Int()
-	ntpServerIsLocal   = kingpin.Flag("collector.ntp.server-is-local", "Certify that collector.ntp.server address is not a public ntp server").Default("false").Bool()
-	ntpIPTTL           = kingpin.Flag("collector.ntp.ip-ttl", "IP TTL to use while sending NTP query").Default("1").Int()
+	ntpServer          *string
+	ntpServerPort      *int
+	ntpProtocolVersion *int
+	ntpServerIsLocal   *bool
+	ntpIPTTL           *int
 	// 3.46608s ~ 1.5s + PHI * (1 << maxPoll), where 1.5s is MAXDIST from ntp.org, it is 1.0 in RFC5905
 	// max-distance option is used as-is without phi*(1<<poll)
-	ntpMaxDistance     = kingpin.Flag("collector.ntp.max-distance", "Max accumulated distance to the root").Default("3.46608s").Duration()
-	ntpOffsetTolerance = kingpin.Flag("collector.ntp.local-offset-tolerance", "Offset between local clock and local ntpd time to tolerate").Default("1ms").Duration()
+	ntpMaxDistance     *time.Duration
+	ntpOffsetTolerance *time.Duration
 
 	leapMidnight      time.Time
 	leapMidnightMutex = &sync.Mutex{}
@@ -55,7 +55,20 @@ type ntpCollector struct {
 }
 
 func init() {
-	registerCollector("ntp", defaultDisabled, NewNtpCollector)
+	registerCollector("ntp", defaultDisabled, NewNtpCollector, NewNtpCollectorFlags)
+}
+
+// NewNtpCollectorFlags is register CLI flags
+func NewNtpCollectorFlags(app *kingpin.Application) {
+	ntpServer = app.Flag("collector.ntp.server", "NTP server to use for ntp collector").Default("127.0.0.1").String()
+	ntpServerPort = app.Flag("collector.ntp.server-port", "UDP port number to connect to on NTP server").Default("123").Int()
+	ntpProtocolVersion = app.Flag("collector.ntp.protocol-version", "NTP protocol version").Default("4").Int()
+	ntpServerIsLocal = app.Flag("collector.ntp.server-is-local", "Certify that collector.ntp.server address is not a public ntp server").Default("false").Bool()
+	ntpIPTTL = app.Flag("collector.ntp.ip-ttl", "IP TTL to use while sending NTP query").Default("1").Int()
+	// 3.46608s ~ 1.5s + PHI * (1 << maxPoll), where 1.5s is MAXDIST from ntp.org, it is 1.0 in RFC5905
+	// max-distance option is used as-is without phi*(1<<poll)
+	ntpMaxDistance = app.Flag("collector.ntp.max-distance", "Max accumulated distance to the root").Default("3.46608s").Duration()
+	ntpOffsetTolerance = app.Flag("collector.ntp.local-offset-tolerance", "Offset between local clock and local ntpd time to tolerate").Default("1ms").Duration()
 }
 
 // NewNtpCollector returns a new Collector exposing sanity of local NTP server.

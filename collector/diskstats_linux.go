@@ -89,7 +89,7 @@ type diskstatsCollector struct {
 }
 
 func init() {
-	registerCollector("diskstats", defaultEnabled, NewDiskstatsCollector)
+	registerCollector("diskstats", defaultEnabled, NewDiskstatsCollector, NewDiskstatsDeviceFilterFlags)
 }
 
 // NewDiskstatsCollector returns a new Collector exposing disk device stats.

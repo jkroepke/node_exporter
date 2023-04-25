@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"runtime"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
@@ -30,9 +31,10 @@ import (
 )
 
 var (
-	netclassIgnoredDevices = kingpin.Flag("collector.netclass.ignored-devices", "Regexp of net devices to ignore for netclass collector.").Default("^$").String()
-	netclassInvalidSpeed   = kingpin.Flag("collector.netclass.ignore-invalid-speed", "Ignore devices where the speed is invalid. This will be the default behavior in 2.x.").Bool()
-	netclassNetlink        = kingpin.Flag("collector.netclass.netlink", "Use netlink to gather stats instead of /proc/net/dev.").Default("false").Bool()
+	netclassIgnoredDevices *string
+	netclassInvalidSpeed   *bool
+	netclassNetlink        *bool
+	netclassRTNLWithStats  *bool
 )
 
 type netClassCollector struct {
@@ -44,7 +46,18 @@ type netClassCollector struct {
 }
 
 func init() {
-	registerCollector("netclass", defaultEnabled, NewNetClassCollector)
+	registerCollector("netclass", defaultEnabled, NewNetClassCollector, NewNetClassCollectorFlags)
+}
+
+// NewNetClassCollectorFlags is register CLI flags
+func NewNetClassCollectorFlags(app *kingpin.Application) {
+	netclassIgnoredDevices = app.Flag("collector.netclass.ignored-devices", "Regexp of net devices to ignore for netclass collector.").Default("^$").String()
+	netclassInvalidSpeed = app.Flag("collector.netclass.ignore-invalid-speed", "Ignore devices where the speed is invalid. This will be the default behavior in 2.x.").Bool()
+	netclassNetlink = app.Flag("collector.netclass.netlink", "Use netlink to gather stats instead of /proc/net/dev.").Default("false").Bool()
+
+	if runtime.GOOS == "linux" {
+		netclassRTNLWithStats = app.Flag("collector.netclass_rtnl.with-stats", "Expose the statistics for each network device, replacing netdev collector.").Bool()
+	}
 }
 
 // NewNetClassCollector returns a new Collector exposing network class stats.

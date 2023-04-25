@@ -143,35 +143,40 @@ func (h *handler) innerHandler(filters ...string) (http.Handler, error) {
 }
 
 func main() {
+	app := kingpin.New("node_exporter", "")
 	var (
-		metricsPath = kingpin.Flag(
+		metricsPath = app.Flag(
 			"web.telemetry-path",
 			"Path under which to expose metrics.",
 		).Default("/metrics").String()
-		disableExporterMetrics = kingpin.Flag(
+		disableExporterMetrics = app.Flag(
 			"web.disable-exporter-metrics",
 			"Exclude metrics about the exporter itself (promhttp_*, process_*, go_*).",
 		).Bool()
-		maxRequests = kingpin.Flag(
+		maxRequests = app.Flag(
 			"web.max-requests",
 			"Maximum number of parallel scrape requests. Use 0 to disable.",
 		).Default("40").Int()
-		disableDefaultCollectors = kingpin.Flag(
+		disableDefaultCollectors = app.Flag(
 			"collector.disable-defaults",
 			"Set all collectors to disabled by default.",
 		).Default("false").Bool()
-		maxProcs = kingpin.Flag(
+		maxProcs = app.Flag(
 			"runtime.gomaxprocs", "The target number of CPUs Go will run on (GOMAXPROCS)",
 		).Envar("GOMAXPROCS").Default("1").Int()
-		toolkitFlags = kingpinflag.AddFlags(kingpin.CommandLine, ":9100")
+		toolkitFlags = kingpinflag.AddFlags(app, ":9100")
 	)
 
+	// Initialize collectors before loading and parsing CLI arguments
+	collector.RegisterCollectorsFlags(app)
+
 	promlogConfig := &promlog.Config{}
-	flag.AddFlags(kingpin.CommandLine, promlogConfig)
-	kingpin.Version(version.Print("node_exporter"))
-	kingpin.CommandLine.UsageWriter(os.Stdout)
-	kingpin.HelpFlag.Short('h')
-	kingpin.Parse()
+	flag.AddFlags(app, promlogConfig)
+	app.Version(version.Print("node_exporter"))
+	app.UsageWriter(os.Stdout)
+	app.HelpFlag.Short('h')
+
+	kingpin.MustParse(app.Parse(os.Args[1:]))
 	logger := promlog.New(promlogConfig)
 
 	if *disableDefaultCollectors {

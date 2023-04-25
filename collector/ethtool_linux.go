@@ -40,9 +40,9 @@ import (
 )
 
 var (
-	ethtoolDeviceInclude   = kingpin.Flag("collector.ethtool.device-include", "Regexp of ethtool devices to include (mutually exclusive to device-exclude).").String()
-	ethtoolDeviceExclude   = kingpin.Flag("collector.ethtool.device-exclude", "Regexp of ethtool devices to exclude (mutually exclusive to device-include).").String()
-	ethtoolIncludedMetrics = kingpin.Flag("collector.ethtool.metrics-include", "Regexp of ethtool stats to include.").Default(".*").String()
+	ethtoolDeviceInclude   *string
+	ethtoolDeviceExclude   *string
+	ethtoolIncludedMetrics *string
 	ethtoolReceivedRegex   = regexp.MustCompile(`(^|_)rx(_|$)`)
 	ethtoolTransmitRegex   = regexp.MustCompile(`(^|_)tx(_|$)`)
 )
@@ -201,7 +201,7 @@ func makeEthtoolCollector(logger log.Logger) (*ethtoolCollector, error) {
 }
 
 func init() {
-	registerCollector("ethtool", defaultDisabled, NewEthtoolCollector)
+	registerCollector("ethtool", defaultDisabled, NewEthtoolCollector, NewEthtoolCollectorFlags)
 }
 
 // Generate the fully-qualified metric name for the ethool metric.
@@ -210,6 +210,13 @@ func buildEthtoolFQName(metric string) string {
 	metricName = ethtoolReceivedRegex.ReplaceAllString(metricName, "${1}received${2}")
 	metricName = ethtoolTransmitRegex.ReplaceAllString(metricName, "${1}transmitted${2}")
 	return prometheus.BuildFQName(namespace, "ethtool", metricName)
+}
+
+// NewEthtoolCollectorFlags is register CLI flags
+func NewEthtoolCollectorFlags(app *kingpin.Application) {
+	ethtoolDeviceInclude = app.Flag("collector.ethtool.device-include", "Regexp of ethtool devices to include (mutually exclusive to device-exclude).").String()
+	ethtoolDeviceExclude = app.Flag("collector.ethtool.device-exclude", "Regexp of ethtool devices to exclude (mutually exclusive to device-include).").String()
+	ethtoolIncludedMetrics = app.Flag("collector.ethtool.metrics-include", "Regexp of ethtool stats to include.").Default(".*").String()
 }
 
 // NewEthtoolCollector returns a new Collector exposing ethtool stats.

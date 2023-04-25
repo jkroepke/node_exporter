@@ -36,7 +36,7 @@ const (
 )
 
 var (
-	netStatFields = kingpin.Flag("collector.netstat.fields", "Regexp of fields to return for netstat collector.").Default("^(.*_(InErrors|InErrs)|Ip_Forwarding|Ip(6|Ext)_(InOctets|OutOctets)|Icmp6?_(InMsgs|OutMsgs)|TcpExt_(Listen.*|Syncookies.*|TCPSynRetrans|TCPTimeouts)|Tcp_(ActiveOpens|InSegs|OutSegs|OutRsts|PassiveOpens|RetransSegs|CurrEstab)|Udp6?_(InDatagrams|OutDatagrams|NoPorts|RcvbufErrors|SndbufErrors))$").String()
+	netStatFields *string
 )
 
 type netStatCollector struct {
@@ -45,7 +45,12 @@ type netStatCollector struct {
 }
 
 func init() {
-	registerCollector("netstat", defaultEnabled, NewNetStatCollector)
+	registerCollector("netstat", defaultEnabled, NewNetStatCollector, NewNetStatCollectorFlags)
+}
+
+// NewNetStatCollectorFlags is register CLI flags
+func NewNetStatCollectorFlags(app *kingpin.Application) {
+	netStatFields = app.Flag("collector.netstat.fields", "Regexp of fields to return for netstat collector.").Default("^(.*_(InErrors|InErrs)|Ip_Forwarding|Ip(6|Ext)_(InOctets|OutOctets)|Icmp6?_(InMsgs|OutMsgs)|TcpExt_(Listen.*|Syncookies.*|TCPSynRetrans|TCPTimeouts)|Tcp_(ActiveOpens|InSegs|OutSegs|OutRsts|PassiveOpens|RetransSegs|CurrEstab)|Udp6?_(InDatagrams|OutDatagrams|NoPorts|RcvbufErrors|SndbufErrors))$").String()
 }
 
 // NewNetStatCollector takes and returns

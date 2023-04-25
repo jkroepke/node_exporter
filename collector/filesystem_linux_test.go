@@ -14,9 +14,10 @@
 package collector
 
 import (
-	"github.com/go-kit/log"
 	"strings"
 	"testing"
+
+	"github.com/go-kit/log"
 
 	"github.com/alecthomas/kingpin/v2"
 )
@@ -42,7 +43,9 @@ func Test_parseFilesystemLabelsError(t *testing.T) {
 }
 
 func TestMountPointDetails(t *testing.T) {
-	if _, err := kingpin.CommandLine.Parse([]string{"--path.procfs", "./fixtures/proc"}); err != nil {
+	app := kingpin.New("", "")
+	NewFilesystemCollectorFlags(app)
+	if _, err := app.Parse([]string{"--path.procfs", "./fixtures/proc"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -92,7 +95,9 @@ func TestMountPointDetails(t *testing.T) {
 }
 
 func TestMountsFallback(t *testing.T) {
-	if _, err := kingpin.CommandLine.Parse([]string{"--path.procfs", "./fixtures_hidepid/proc"}); err != nil {
+	app := kingpin.New("", "")
+	NewFilesystemCollectorFlags(app)
+	if _, err := app.Parse([]string{"--path.procfs", "./fixtures_hidepid/proc"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -113,7 +118,9 @@ func TestMountsFallback(t *testing.T) {
 }
 
 func TestPathRootfs(t *testing.T) {
-	if _, err := kingpin.CommandLine.Parse([]string{"--path.procfs", "./fixtures_bindmount/proc", "--path.rootfs", "/host"}); err != nil {
+	app := kingpin.New("", "")
+	NewFilesystemCollectorFlags(app)
+	if _, err := app.Parse([]string{"--path.procfs", "./fixtures_bindmount/proc", "--path.rootfs", "/host"}); err != nil {
 		t.Fatal(err)
 	}
 

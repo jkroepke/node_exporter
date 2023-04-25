@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"io/fs"
 
-	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log/level"
 	"github.com/jsimonetti/rtnetlink"
 	"github.com/mdlayher/ethtool"
@@ -29,8 +28,7 @@ import (
 )
 
 var (
-	netclassRTNLWithStats = kingpin.Flag("collector.netclass_rtnl.with-stats", "Expose the statistics for each network device, replacing netdev collector.").Bool()
-	operstateStr          = []string{
+	operstateStr = []string{
 		"unknown", "notpresent", "down", "lowerlayerdown", "testing",
 		"dormant", "up",
 	}

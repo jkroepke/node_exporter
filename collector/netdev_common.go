@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime"
 	"strconv"
 	"sync"
 
@@ -31,12 +32,13 @@ import (
 )
 
 var (
-	netdevDeviceInclude    = kingpin.Flag("collector.netdev.device-include", "Regexp of net devices to include (mutually exclusive to device-exclude).").String()
-	oldNetdevDeviceInclude = kingpin.Flag("collector.netdev.device-whitelist", "DEPRECATED: Use collector.netdev.device-include").Hidden().String()
-	netdevDeviceExclude    = kingpin.Flag("collector.netdev.device-exclude", "Regexp of net devices to exclude (mutually exclusive to device-include).").String()
-	oldNetdevDeviceExclude = kingpin.Flag("collector.netdev.device-blacklist", "DEPRECATED: Use collector.netdev.device-exclude").Hidden().String()
-	netdevAddressInfo      = kingpin.Flag("collector.netdev.address-info", "Collect address-info for every device").Bool()
-	netdevDetailedMetrics  = kingpin.Flag("collector.netdev.enable-detailed-metrics", "Use (incompatible) metric names that provide more detailed stats on Linux").Bool()
+	netdevDeviceInclude    *string
+	oldNetdevDeviceInclude *string
+	netdevDeviceExclude    *string
+	oldNetdevDeviceExclude *string
+	netdevAddressInfo      *bool
+	netdevDetailedMetrics  *bool
+	netDevNetlink          *bool
 )
 
 type netDevCollector struct {
@@ -50,10 +52,23 @@ type netDevCollector struct {
 type netDevStats map[string]map[string]uint64
 
 func init() {
-	registerCollector("netdev", defaultEnabled, NewNetDevCollector)
+	registerCollector("netdev", defaultEnabled, NewNetDevCollector, NewNetDevCollectorFlags)
 }
 
-// NewNetDevCollector returns a new Collector exposing network device stats.
+// NewNetDevCollectorFlags is register CLI flags
+func NewNetDevCollectorFlags(app *kingpin.Application) {
+	netdevDeviceInclude = app.Flag("collector.netdev.device-include", "Regexp of net devices to include (mutually exclusive to device-exclude).").String()
+	oldNetdevDeviceInclude = app.Flag("collector.netdev.device-whitelist", "DEPRECATED: Use collector.netdev.device-include").Hidden().String()
+	netdevDeviceExclude = app.Flag("collector.netdev.device-exclude", "Regexp of net devices to exclude (mutually exclusive to device-include).").String()
+	oldNetdevDeviceExclude = app.Flag("collector.netdev.device-blacklist", "DEPRECATED: Use collector.netdev.device-exclude").Hidden().String()
+	netdevAddressInfo = app.Flag("collector.netdev.address-info", "Collect address-info for every device").Bool()
+	netdevDetailedMetrics = app.Flag("collector.netdev.enable-detailed-metrics", "Use (incompatible) metric names that provide more detailed stats on Linux").Bool()
+
+	if runtime.GOOS == "linux" {
+		netDevNetlink = app.Flag("collector.netdev.netlink", "Use netlink to gather stats instead of /proc/net/dev.").Default("true").Bool()
+	}
+}
+
 func NewNetDevCollector(logger log.Logger) (Collector, error) {
 	if *oldNetdevDeviceInclude != "" {
 		if *netdevDeviceInclude == "" {

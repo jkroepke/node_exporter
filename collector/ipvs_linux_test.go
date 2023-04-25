@@ -108,7 +108,9 @@ func TestIPVSCollector(t *testing.T) {
 			if test.labels != "<none>" {
 				args = append(args, "--collector.ipvs.backend-labels="+test.labels)
 			}
-			if _, err := kingpin.CommandLine.Parse(args); err != nil {
+			app := kingpin.New("", "")
+			NewIPVSCollectorFlags(app)
+			if _, err := app.Parse(args); err != nil {
 				t.Fatal(err)
 			}
 			collector, err := newIPVSCollector(log.NewNopLogger())
@@ -176,7 +178,9 @@ func TestIPVSCollectorResponse(t *testing.T) {
 			if test.labels != "<none>" {
 				args = append(args, "--collector.ipvs.backend-labels="+test.labels)
 			}
-			if _, err := kingpin.CommandLine.Parse(args); err != nil {
+			app := kingpin.New("", "")
+			NewIPVSCollectorFlags(app)
+			if _, err := app.Parse(args); err != nil {
 				t.Fatal(err)
 			}
 			collector, err := NewIPVSCollector(log.NewNopLogger())

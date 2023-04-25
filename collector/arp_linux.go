@@ -18,6 +18,7 @@ package collector
 
 import (
 	"fmt"
+
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -25,8 +26,8 @@ import (
 )
 
 var (
-	arpDeviceInclude = kingpin.Flag("collector.arp.device-include", "Regexp of arp devices to include (mutually exclusive to device-exclude).").String()
-	arpDeviceExclude = kingpin.Flag("collector.arp.device-exclude", "Regexp of arp devices to exclude (mutually exclusive to device-include).").String()
+	arpDeviceInclude *string
+	arpDeviceExclude *string
 )
 
 type arpCollector struct {
@@ -37,7 +38,13 @@ type arpCollector struct {
 }
 
 func init() {
-	registerCollector("arp", defaultEnabled, NewARPCollector)
+	registerCollector("arp", defaultEnabled, NewARPCollector, NewARPCollectorFlags)
+}
+
+// NewARPCollectorFlags is register CLI flags
+func NewARPCollectorFlags(app *kingpin.Application) {
+	arpDeviceInclude = app.Flag("collector.arp.device-include", "Regexp of arp devices to include (mutually exclusive to device-exclude).").String()
+	arpDeviceExclude = app.Flag("collector.arp.device-exclude", "Regexp of arp devices to exclude (mutually exclusive to device-include).").String()
 }
 
 // NewARPCollector returns a new Collector exposing ARP stats.

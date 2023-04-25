@@ -64,11 +64,16 @@ var (
 		ipvsLabelProto,
 		ipvsLabelLocalMark,
 	}
-	ipvsLabels = kingpin.Flag("collector.ipvs.backend-labels", "Comma separated list for IPVS backend stats labels.").Default(strings.Join(fullIpvsBackendLabels, ",")).String()
+	ipvsLabels *string
 )
 
 func init() {
-	registerCollector("ipvs", defaultEnabled, NewIPVSCollector)
+	registerCollector("ipvs", defaultEnabled, NewIPVSCollector, NewIPVSCollectorFlags)
+}
+
+// NewIPVSCollectorFlags is register CLI flags
+func NewIPVSCollectorFlags(app *kingpin.Application) {
+	ipvsLabels = app.Flag("collector.ipvs.backend-labels", "Comma separated list for IPVS backend stats labels.").Default(strings.Join(fullIpvsBackendLabels, ",")).String()
 }
 
 // NewIPVSCollector sets up a new collector for IPVS metrics. It accepts the

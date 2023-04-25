@@ -26,17 +26,22 @@ import (
 )
 
 var (
-	priorityStats = kingpin.Flag("collector.bcache.priorityStats", "Expose expensive priority stats.").Bool()
+	priorityStats *bool
 )
 
 func init() {
-	registerCollector("bcache", defaultEnabled, NewBcacheCollector)
+	registerCollector("bcache", defaultEnabled, NewBcacheCollector, NewBcacheCollectorFlags)
 }
 
 // A bcacheCollector is a Collector which gathers metrics from Linux bcache.
 type bcacheCollector struct {
 	fs     bcache.FS
 	logger log.Logger
+}
+
+// NewBcacheCollectorFlags is register CLI flags
+func NewBcacheCollectorFlags(app *kingpin.Application) {
+	priorityStats = app.Flag("collector.bcache.priorityStats", "Expose expensive priority stats.").Bool()
 }
 
 // NewBcacheCollector returns a newly allocated bcacheCollector.

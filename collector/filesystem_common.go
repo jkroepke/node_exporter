@@ -20,6 +20,8 @@ package collector
 import (
 	"errors"
 	"regexp"
+	"runtime"
+	"time"
 
 	"github.com/alecthomas/kingpin/v2"
 	"github.com/go-kit/log"
@@ -34,31 +36,15 @@ import (
 // * filesystemCollector.GetStats
 
 var (
-	mountPointsExcludeSet bool
-	mountPointsExclude    = kingpin.Flag(
-		"collector.filesystem.mount-points-exclude",
-		"Regexp of mount points to exclude for filesystem collector.",
-	).Default(defMountPointsExcluded).PreAction(func(c *kingpin.ParseContext) error {
-		mountPointsExcludeSet = true
-		return nil
-	}).String()
-	oldMountPointsExcluded = kingpin.Flag(
-		"collector.filesystem.ignored-mount-points",
-		"Regexp of mount points to ignore for filesystem collector.",
-	).Hidden().String()
+	mountPointsExcludeSet  bool
+	mountPointsExclude     *string
+	oldMountPointsExcluded *string
 
-	fsTypesExcludeSet bool
-	fsTypesExclude    = kingpin.Flag(
-		"collector.filesystem.fs-types-exclude",
-		"Regexp of filesystem types to exclude for filesystem collector.",
-	).Default(defFSTypesExcluded).PreAction(func(c *kingpin.ParseContext) error {
-		fsTypesExcludeSet = true
-		return nil
-	}).String()
-	oldFSTypesExcluded = kingpin.Flag(
-		"collector.filesystem.ignored-fs-types",
-		"Regexp of filesystem types to ignore for filesystem collector.",
-	).Hidden().String()
+	fsTypesExcludeSet  bool
+	fsTypesExclude     *string
+	oldFSTypesExcluded *string
+
+	mountTimeout *time.Duration
 
 	filesystemLabelNames = []string{"device", "mountpoint", "fstype"}
 )
@@ -84,7 +70,41 @@ type filesystemStats struct {
 }
 
 func init() {
-	registerCollector("filesystem", defaultEnabled, NewFilesystemCollector)
+	registerCollector("filesystem", defaultEnabled, NewFilesystemCollector, NewFilesystemCollectorFlags)
+}
+
+// NewFilesystemCollectorFlags is register CLI flags
+func NewFilesystemCollectorFlags(app *kingpin.Application) {
+	mountPointsExclude = app.Flag(
+		"collector.filesystem.mount-points-exclude",
+		"Regexp of mount points to exclude for filesystem collector.",
+	).Default(defMountPointsExcluded).PreAction(func(c *kingpin.ParseContext) error {
+		mountPointsExcludeSet = true
+		return nil
+	}).String()
+	oldMountPointsExcluded = app.Flag(
+		"collector.filesystem.ignored-mount-points",
+		"Regexp of mount points to ignore for filesystem collector.",
+	).Hidden().String()
+
+	fsTypesExclude = app.Flag(
+		"collector.filesystem.fs-types-exclude",
+		"Regexp of filesystem types to exclude for filesystem collector.",
+	).Default(defFSTypesExcluded).PreAction(func(c *kingpin.ParseContext) error {
+		fsTypesExcludeSet = true
+		return nil
+	}).String()
+
+	if runtime.GOOS == "linux" {
+		mountTimeout = app.Flag("collector.filesystem.mount-timeout",
+			"how long to wait for a mount to respond before marking it as stale").
+			Hidden().Default("5s").Duration()
+	}
+
+	oldFSTypesExcluded = app.Flag(
+		"collector.filesystem.ignored-fs-types",
+		"Regexp of filesystem types to ignore for filesystem collector.",
+	).Hidden().String()
 }
 
 // NewFilesystemCollector returns a new Collector exposing filesystems stats.

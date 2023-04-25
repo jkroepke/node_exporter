@@ -57,7 +57,7 @@ var (
 	forcedCollectors       = map[string]bool{} // collectors which have been explicitly enabled or disabled
 )
 
-func registerCollector(collector string, isDefaultEnabled bool, factory func(logger log.Logger) (Collector, error)) {
+func registerCollector(collector string, isDefaultEnabled bool, factory func(logger log.Logger) (Collector, error), flags func(application *kingpin.Application)) {
 	var helpDefaultState string
 	if isDefaultEnabled {
 		helpDefaultState = "enabled"
