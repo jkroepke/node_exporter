@@ -42,10 +42,16 @@ const (
 	qXGetNextProjectQuota = (qXGetNextQuota << 8) | xqmProjectQuota
 )
 
-var enableXFSQuotaProjectInfo = kingpin.Flag(
-	"collector.xfs_quota.project-info",
-	"Enables metric node_xfs_quota_project_info using project paths from /etc/projects.",
-).Bool()
+var (
+	enableXFSQuotaProjectInfo = kingpin.Flag(
+		"collector.xfs_quota.project-info",
+		"Enables metric node_xfs_quota_project_info using project paths from /etc/projects.",
+	).Bool()
+	xfsQuotaProjectsPath = kingpin.Flag(
+		"collector.xfs_quota.projects-path",
+		"Path to the XFS projects file used by the project-info subcollector.",
+	).Default("/etc/projects").String()
+)
 
 // xfsDiskQuota matches struct fs_disk_quota from
 // include/uapi/linux/dqblk_xfs.h.
@@ -111,7 +117,7 @@ func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
 		mountPointDetails:   mountPointDetails,
 		getNextProjectQuota: getNextXFSProjectQuota,
 		readProjectPaths:    readXFSProjectPaths,
-		projectsFile:        rootfsFilePath("/etc/projects"),
+		projectsFile:        *xfsQuotaProjectsPath,
 		projectInfoEnabled:  *enableXFSQuotaProjectInfo,
 		usedBytesDesc: typedDesc{
 			desc: prometheus.NewDesc(

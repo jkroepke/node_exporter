@@ -90,6 +90,7 @@ node_xfs_quota_used_inodes{device="/dev/sda1",project_id="42"} 3
 func TestXFSQuotaCollectorProjectInfo(t *testing.T) {
 	collector := newTestXFSQuotaCollector()
 	collector.projectInfoEnabled = true
+	collector.projectsFile = "/host/etc/projects"
 	collector.mountPointDetails = func(*slog.Logger) ([]filesystemLabels, error) {
 		return []filesystemLabels{
 			{device: "/dev/sda1", mountPoint: "/xfs", fsType: "xfs"},
@@ -100,7 +101,7 @@ func TestXFSQuotaCollectorProjectInfo(t *testing.T) {
 		return xfsDiskQuota{}, unix.ESRCH
 	}
 	collector.readProjectPaths = func(path string) ([]xfsProjectPath, error) {
-		if path != rootfsFilePath("/etc/projects") {
+		if path != "/host/etc/projects" {
 			t.Fatalf("unexpected projects file: %q", path)
 		}
 		return []xfsProjectPath{
@@ -227,21 +228,21 @@ func newTestXFSQuotaCollector() *xfsQuotaCollector {
 		}, nil
 	}
 	collector.getNextProjectQuota = func(device string, projectID uint32) (xfsDiskQuota, error) {
-			if device != rootfsFilePath("/dev/sda1") {
-				return xfsDiskQuota{}, fmt.Errorf("unexpected device: %q", device)
-			}
-			if projectID != 0 {
-				return xfsDiskQuota{}, unix.ESRCH
-			}
-			return xfsDiskQuota{
-				ID:             42,
-				BlockCount:     2,
-				BlockSoftLimit: 4,
-				BlockHardLimit: 8,
-				InodeCount:     3,
-				InodeSoftLimit: 5,
-				InodeHardLimit: 7,
-			}, nil
+		if device != rootfsFilePath("/dev/sda1") {
+			return xfsDiskQuota{}, fmt.Errorf("unexpected device: %q", device)
+		}
+		if projectID != 0 {
+			return xfsDiskQuota{}, unix.ESRCH
+		}
+		return xfsDiskQuota{
+			ID:             42,
+			BlockCount:     2,
+			BlockSoftLimit: 4,
+			BlockHardLimit: 8,
+			InodeCount:     3,
+			InodeSoftLimit: 5,
+			InodeHardLimit: 7,
+		}, nil
 	}
 
 	return collector
