@@ -32,16 +32,10 @@ import (
 
 const xfsQuotaSubsystem = "xfs_quota"
 
-var (
-	enableXFSQuotaProjectInfo = kingpin.Flag(
-		"collector.xfs_quota.project-info",
-		"Enables metric node_xfs_quota_project_info using paths from the XFS projects file.",
-	).Bool()
-	xfsQuotaProjectsPath = kingpin.Flag(
-		"collector.xfs_quota.projects-path",
-		"Path to the XFS projects file.",
-	).Default("/etc/projects").String()
-)
+var xfsQuotaProjectsPath = kingpin.Flag(
+	"collector.xfs_quota.projects-path",
+	"Path to the XFS projects file.",
+).Default("/etc/projects").String()
 
 type xfsQuotaCollector struct {
 	logger             *slog.Logger
@@ -49,13 +43,11 @@ type xfsQuotaCollector struct {
 	readProjectPaths   func(string) ([]xfsProjectPath, error)
 	statfs             func(string, *unix.Statfs_t) error
 	projectsFile       string
-	projectInfoEnabled bool
 	sizeDesc           typedDesc
 	freeDesc           typedDesc
 	availDesc          typedDesc
 	filesDesc          typedDesc
 	filesFreeDesc      typedDesc
-	projectInfoDesc    typedDesc
 }
 
 type xfsProjectPath struct {
@@ -70,7 +62,7 @@ func init() {
 // NewXFSQuotaCollector returns a new Collector exposing effective XFS project
 // quota filesystem statistics through statfs(2).
 func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
-	quotaLabelNames := []string{"device", "project_id"}
+	quotaLabelNames := []string{"device", "project_id", "path"}
 
 	return &xfsQuotaCollector{
 		logger:             logger,
@@ -78,7 +70,6 @@ func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
 		readProjectPaths:   readXFSProjectPaths,
 		statfs:             unix.Statfs,
 		projectsFile:       *xfsQuotaProjectsPath,
-		projectInfoEnabled: *enableXFSQuotaProjectInfo,
 		sizeDesc: typedDesc{
 			desc: prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, xfsQuotaSubsystem, "size_bytes"),
@@ -119,14 +110,6 @@ func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
 				nil,
 			), valueType: prometheus.GaugeValue,
 		},
-		projectInfoDesc: typedDesc{
-			desc: prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, xfsQuotaSubsystem, "project_info"),
-				"Information about an XFS project path from the configured projects file.",
-				[]string{"device", "project_id", "path"},
-				nil,
-			), valueType: prometheus.GaugeValue,
-		},
 	}, nil
 }
 
@@ -151,7 +134,6 @@ func (c *xfsQuotaCollector) Update(ch chan<- prometheus.Metric) error {
 
 	found := false
 	emittedQuotas := make(map[string]struct{})
-	emittedProjectInfo := make(map[string]struct{})
 	for _, project := range projects {
 		mount, ok := xfsMountForPath(xfsMounts, project.path)
 		if !ok {
@@ -164,14 +146,14 @@ func (c *xfsQuotaCollector) Update(ch chan<- prometheus.Metric) error {
 		}
 
 		projectID := strconv.FormatUint(uint64(project.id), 10)
-		quotaKey := mount.device + "\x00" + projectID
+		quotaKey := mount.device + "\x00" + projectID + "\x00" + project.path
 		if _, ok := emittedQuotas[quotaKey]; !ok {
 			stats := new(unix.Statfs_t)
 			if err := c.statfs(rootfsFilePath(project.path), stats); err != nil {
 				return fmt.Errorf("failed to retrieve XFS project quota for project %s at %q: %w", projectID, project.path, err)
 			}
 
-			labelValues := []string{mount.device, projectID}
+			labelValues := []string{mount.device, projectID, project.path}
 			blockSize := float64(stats.Bsize)
 			ch <- c.sizeDesc.mustNewConstMetric(float64(stats.Blocks)*blockSize, labelValues...)
 			ch <- c.freeDesc.mustNewConstMetric(float64(stats.Bfree)*blockSize, labelValues...)
@@ -181,14 +163,6 @@ func (c *xfsQuotaCollector) Update(ch chan<- prometheus.Metric) error {
 
 			emittedQuotas[quotaKey] = struct{}{}
 			found = true
-		}
-
-		if c.projectInfoEnabled {
-			infoKey := quotaKey + "\x00" + project.path
-			if _, ok := emittedProjectInfo[infoKey]; !ok {
-				ch <- c.projectInfoDesc.mustNewConstMetric(1, mount.device, projectID, project.path)
-				emittedProjectInfo[infoKey] = struct{}{}
-			}
 		}
 	}
 

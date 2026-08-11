@@ -44,19 +44,19 @@ func TestXFSQuotaCollector(t *testing.T) {
 
 	expected := `# HELP node_xfs_quota_avail_bytes Effective space available to non-root users in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_avail_bytes gauge
-node_xfs_quota_avail_bytes{device="/dev/sda1",project_id="42"} 1536
+node_xfs_quota_avail_bytes{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 1536
 # HELP node_xfs_quota_files Effective total file nodes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_files gauge
-node_xfs_quota_files{device="/dev/sda1",project_id="42"} 100
+node_xfs_quota_files{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 100
 # HELP node_xfs_quota_files_free Effective free file nodes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_files_free gauge
-node_xfs_quota_files_free{device="/dev/sda1",project_id="42"} 75
+node_xfs_quota_files_free{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 75
 # HELP node_xfs_quota_free_bytes Effective free space in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_free_bytes gauge
-node_xfs_quota_free_bytes{device="/dev/sda1",project_id="42"} 2048
+node_xfs_quota_free_bytes{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 2048
 # HELP node_xfs_quota_size_bytes Effective size in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_size_bytes gauge
-node_xfs_quota_size_bytes{device="/dev/sda1",project_id="42"} 10240
+node_xfs_quota_size_bytes{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 10240
 `
 
 	if err := testutil.CollectAndCompare(testXFSQuotaCollector{collector}, strings.NewReader(expected)); err != nil {
@@ -64,9 +64,8 @@ node_xfs_quota_size_bytes{device="/dev/sda1",project_id="42"} 10240
 	}
 }
 
-func TestXFSQuotaCollectorProjectInfo(t *testing.T) {
+func TestXFSQuotaCollectorUsesRootfsAndDeduplicatesQuota(t *testing.T) {
 	collector := newTestXFSQuotaCollector()
-	collector.projectInfoEnabled = true
 	collector.projectsFile = "/host/etc/projects"
 	collector.readProjectPaths = func(path string) ([]xfsProjectPath, error) {
 		if path != "/host/etc/projects" {
@@ -74,33 +73,7 @@ func TestXFSQuotaCollectorProjectInfo(t *testing.T) {
 		}
 		return []xfsProjectPath{
 			{id: 42, path: "/xfs/team-a"},
-			{id: 7, path: "/xfs/nested/team-b"},
-			{id: 7, path: "/xfs/nested/team-b"},
-			{id: 100, path: "/not-mounted"},
-		}, nil
-	}
-
-	expected := `# HELP node_xfs_quota_project_info Information about an XFS project path from the configured projects file.
-# TYPE node_xfs_quota_project_info gauge
-node_xfs_quota_project_info{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 1
-node_xfs_quota_project_info{device="/dev/sdb1",path="/xfs/nested/team-b",project_id="7"} 1
-`
-
-	if err := testutil.CollectAndCompare(
-		testXFSQuotaCollector{collector},
-		strings.NewReader(expected),
-		"node_xfs_quota_project_info",
-	); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestXFSQuotaCollectorUsesRootfsAndDeduplicatesQuota(t *testing.T) {
-	collector := newTestXFSQuotaCollector()
-	collector.readProjectPaths = func(string) ([]xfsProjectPath, error) {
-		return []xfsProjectPath{
 			{id: 42, path: "/xfs/team-a"},
-			{id: 42, path: "/xfs/team-a-alias"},
 		}, nil
 	}
 
@@ -230,7 +203,6 @@ func newTestXFSQuotaCollector() *xfsQuotaCollector {
 		panic(err)
 	}
 	collector := createdCollector.(*xfsQuotaCollector)
-	collector.projectInfoEnabled = false
 	collector.projectsFile = "/etc/projects"
 	collector.mountPointDetails = func(*slog.Logger) ([]filesystemLabels, error) {
 		return []filesystemLabels{
