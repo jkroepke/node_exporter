@@ -44,19 +44,19 @@ func TestXFSQuotaCollector(t *testing.T) {
 
 	expected := `# HELP node_xfs_quota_avail_bytes Effective space available to non-root users in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_avail_bytes gauge
-node_xfs_quota_avail_bytes{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 1536
+node_xfs_quota_avail_bytes{device="/dev/sda1",path="/xfs/team-a"} 1536
 # HELP node_xfs_quota_files Effective total file nodes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_files gauge
-node_xfs_quota_files{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 100
+node_xfs_quota_files{device="/dev/sda1",path="/xfs/team-a"} 100
 # HELP node_xfs_quota_files_free Effective free file nodes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_files_free gauge
-node_xfs_quota_files_free{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 75
+node_xfs_quota_files_free{device="/dev/sda1",path="/xfs/team-a"} 75
 # HELP node_xfs_quota_free_bytes Effective free space in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_free_bytes gauge
-node_xfs_quota_free_bytes{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 2048
+node_xfs_quota_free_bytes{device="/dev/sda1",path="/xfs/team-a"} 2048
 # HELP node_xfs_quota_size_bytes Effective size in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_size_bytes gauge
-node_xfs_quota_size_bytes{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 10240
+node_xfs_quota_size_bytes{device="/dev/sda1",path="/xfs/team-a"} 10240
 `
 
 	if err := testutil.CollectAndCompare(testXFSQuotaCollector{collector}, strings.NewReader(expected)); err != nil {
@@ -73,7 +73,7 @@ func TestXFSQuotaCollectorUsesRootfsAndDeduplicatesQuota(t *testing.T) {
 		}
 		return []xfsProjectPath{
 			{id: 42, path: "/xfs/team-a"},
-			{id: 42, path: "/xfs/team-a"},
+			{id: 43, path: "/xfs/team-a"},
 		}, nil
 	}
 
@@ -92,6 +92,47 @@ func TestXFSQuotaCollectorUsesRootfsAndDeduplicatesQuota(t *testing.T) {
 	}
 	if got, want := calls[0], rootfsFilePath("/xfs/team-a"); got != want {
 		t.Fatalf("unexpected statfs path: got %q, want %q", got, want)
+	}
+}
+
+func TestXFSQuotaCollectorReloadsProjectsFile(t *testing.T) {
+	collector := newTestXFSQuotaCollector()
+	reads := 0
+	collector.readProjectPaths = func(path string) ([]xfsProjectPath, error) {
+		if path != "/etc/projects" {
+			t.Fatalf("unexpected projects file: %q", path)
+		}
+		reads++
+		if reads == 1 {
+			return []xfsProjectPath{{id: 42, path: "/xfs/team-a"}}, nil
+		}
+		return []xfsProjectPath{{id: 7, path: "/xfs/nested/team-b"}}, nil
+	}
+
+	paths := make([]string, 0, 2)
+	collector.statfs = func(path string, stats *unix.Statfs_t) error {
+		paths = append(paths, path)
+		*stats = unix.Statfs_t{Bsize: 4096}
+		return nil
+	}
+
+	if err := collector.Update(make(chan prometheus.Metric, 5)); err != nil {
+		t.Fatal(err)
+	}
+	if err := collector.Update(make(chan prometheus.Metric, 5)); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := reads, 2; got != want {
+		t.Fatalf("unexpected number of projects file reads: got %d, want %d", got, want)
+	}
+	wantPaths := []string{rootfsFilePath("/xfs/team-a"), rootfsFilePath("/xfs/nested/team-b")}
+	if got, want := len(paths), len(wantPaths); got != want {
+		t.Fatalf("unexpected number of statfs calls: got %d, want %d", got, want)
+	}
+	for i := range wantPaths {
+		if paths[i] != wantPaths[i] {
+			t.Errorf("unexpected statfs path %d: got %q, want %q", i, paths[i], wantPaths[i])
+		}
 	}
 }
 

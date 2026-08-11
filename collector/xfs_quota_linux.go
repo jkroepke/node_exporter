@@ -62,7 +62,7 @@ func init() {
 // NewXFSQuotaCollector returns a new Collector exposing effective XFS project
 // quota filesystem statistics through statfs(2).
 func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
-	quotaLabelNames := []string{"device", "project_id", "path"}
+	quotaLabelNames := []string{"device", "path"}
 
 	return &xfsQuotaCollector{
 		logger:            logger,
@@ -146,14 +146,14 @@ func (c *xfsQuotaCollector) Update(ch chan<- prometheus.Metric) error {
 		}
 
 		projectID := strconv.FormatUint(uint64(project.id), 10)
-		quotaKey := mount.device + "\x00" + projectID + "\x00" + project.path
+		quotaKey := mount.device + "\x00" + project.path
 		if _, ok := emittedQuotas[quotaKey]; !ok {
 			stats := new(unix.Statfs_t)
 			if err := c.statfs(rootfsFilePath(project.path), stats); err != nil {
 				return fmt.Errorf("failed to retrieve XFS project quota for project %s at %q: %w", projectID, project.path, err)
 			}
 
-			labelValues := []string{mount.device, projectID, project.path}
+			labelValues := []string{mount.device, project.path}
 			blockSize := float64(stats.Bsize)
 			ch <- c.sizeDesc.mustNewConstMetric(float64(stats.Blocks)*blockSize, labelValues...)
 			ch <- c.freeDesc.mustNewConstMetric(float64(stats.Bfree)*blockSize, labelValues...)
