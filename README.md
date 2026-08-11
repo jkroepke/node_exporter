@@ -220,6 +220,7 @@ swap | Expose swap information from `/proc/swaps`. | Linux
 systemd | Exposes service and system status from [systemd](http://www.freedesktop.org/wiki/Software/systemd/). | Linux
 tcpstat | Exposes TCP connection status information from `/proc/net/tcp` and `/proc/net/tcp6`. (Warning: the current version has potential performance issues in high load situations.) | Linux
 wifi | Exposes WiFi device and station statistics. | Linux
+xfs\_quota | Exposes XFS project quota usage and limits. Requires `CAP_SYS_ADMIN`. Project path information can be enabled with `--collector.xfs_quota.project-info`; its file location defaults to `/etc/projects` and can be changed with `--collector.xfs_quota.projects-path`. | Linux
 xfrm | Exposes statistics from `/proc/net/xfrm_stat` | Linux
 zoneinfo | Exposes NUMA memory zone metrics. | Linux
 
