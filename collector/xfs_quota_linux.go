@@ -39,9 +39,9 @@ var xfsQuotaProjectsPath = kingpin.Flag(
 
 type xfsQuotaCollector struct {
 	logger             *slog.Logger
-	mountPointDetails  func(*slog.Logger) ([]filesystemLabels, error)
-	readProjectPaths   func(string) ([]xfsProjectPath, error)
-	statfs             func(string, *unix.Statfs_t) error
+	mountPointDetails func(*slog.Logger) ([]filesystemLabels, error)
+	readProjectPaths  func(string) ([]xfsProjectPath, error)
+	statfs            func(string, *unix.Statfs_t) error
 	projectsFile       string
 	sizeDesc           typedDesc
 	freeDesc           typedDesc
