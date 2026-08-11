@@ -38,16 +38,16 @@ var xfsQuotaProjectsPath = kingpin.Flag(
 ).Default("/etc/projects").String()
 
 type xfsQuotaCollector struct {
-	logger             *slog.Logger
+	logger            *slog.Logger
 	mountPointDetails func(*slog.Logger) ([]filesystemLabels, error)
 	readProjectPaths  func(string) ([]xfsProjectPath, error)
 	statfs            func(string, *unix.Statfs_t) error
-	projectsFile       string
-	sizeDesc           typedDesc
-	freeDesc           typedDesc
-	availDesc          typedDesc
-	filesDesc          typedDesc
-	filesFreeDesc      typedDesc
+	projectsFile      string
+	sizeDesc          typedDesc
+	freeDesc          typedDesc
+	availDesc         typedDesc
+	filesDesc         typedDesc
+	filesFreeDesc     typedDesc
 }
 
 type xfsProjectPath struct {
@@ -65,11 +65,11 @@ func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
 	quotaLabelNames := []string{"device", "project_id", "path"}
 
 	return &xfsQuotaCollector{
-		logger:             logger,
-		mountPointDetails:  mountPointDetails,
-		readProjectPaths:   readXFSProjectPaths,
-		statfs:             unix.Statfs,
-		projectsFile:       *xfsQuotaProjectsPath,
+		logger:            logger,
+		mountPointDetails: mountPointDetails,
+		readProjectPaths:  readXFSProjectPaths,
+		statfs:            unix.Statfs,
+		projectsFile:      *xfsQuotaProjectsPath,
 		sizeDesc: typedDesc{
 			desc: prometheus.NewDesc(
 				prometheus.BuildFQName(namespace, xfsQuotaSubsystem, "size_bytes"),
