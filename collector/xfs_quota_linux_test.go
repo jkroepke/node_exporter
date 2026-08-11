@@ -160,13 +160,13 @@ func newTestXFSQuotaCollector() *xfsQuotaCollector {
 				return xfsDiskQuota{}, unix.ESRCH
 			}
 			return xfsDiskQuota{
-				ID:                 42,
-				BlockCount:         2,
-				BlockSoftLimit:     4,
-				BlockHardLimit:     8,
-				InodeCount:         3,
-				InodeSoftLimit:     5,
-				InodeHardLimit:     7,
+				ID:             42,
+				BlockCount:     2,
+				BlockSoftLimit: 4,
+				BlockHardLimit: 8,
+				InodeCount:     3,
+				InodeSoftLimit: 5,
+				InodeHardLimit: 7,
 			}, nil
 		},
 	}
