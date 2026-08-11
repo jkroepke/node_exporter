@@ -44,19 +44,22 @@ func TestXFSQuotaCollector(t *testing.T) {
 
 	expected := `# HELP node_xfs_quota_avail_bytes Effective space available to non-root users in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_avail_bytes gauge
-node_xfs_quota_avail_bytes{device="/dev/sda1",path="/xfs/team-a"} 1536
+node_xfs_quota_avail_bytes{device="/dev/sda1",device_error="",path="/xfs/team-a"} 1536
+# HELP node_xfs_quota_device_error Whether an error occurred while getting statistics for the given XFS project quota path.
+# TYPE node_xfs_quota_device_error gauge
+node_xfs_quota_device_error{device="/dev/sda1",device_error="",path="/xfs/team-a"} 0
 # HELP node_xfs_quota_files Effective total file nodes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_files gauge
-node_xfs_quota_files{device="/dev/sda1",path="/xfs/team-a"} 100
+node_xfs_quota_files{device="/dev/sda1",device_error="",path="/xfs/team-a"} 100
 # HELP node_xfs_quota_files_free Effective free file nodes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_files_free gauge
-node_xfs_quota_files_free{device="/dev/sda1",path="/xfs/team-a"} 75
+node_xfs_quota_files_free{device="/dev/sda1",device_error="",path="/xfs/team-a"} 75
 # HELP node_xfs_quota_free_bytes Effective free space in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_free_bytes gauge
-node_xfs_quota_free_bytes{device="/dev/sda1",path="/xfs/team-a"} 2048
+node_xfs_quota_free_bytes{device="/dev/sda1",device_error="",path="/xfs/team-a"} 2048
 # HELP node_xfs_quota_size_bytes Effective size in bytes reported by statfs for an XFS project quota path.
 # TYPE node_xfs_quota_size_bytes gauge
-node_xfs_quota_size_bytes{device="/dev/sda1",path="/xfs/team-a"} 10240
+node_xfs_quota_size_bytes{device="/dev/sda1",device_error="",path="/xfs/team-a"} 10240
 `
 
 	if err := testutil.CollectAndCompare(testXFSQuotaCollector{collector}, strings.NewReader(expected)); err != nil {
@@ -84,7 +87,7 @@ func TestXFSQuotaCollectorUsesRootfsAndDeduplicatesQuota(t *testing.T) {
 		return nil
 	}
 
-	if err := collector.Update(make(chan prometheus.Metric, 5)); err != nil {
+	if err := collector.Update(make(chan prometheus.Metric, 6)); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := len(calls), 1; got != want {
@@ -116,10 +119,10 @@ func TestXFSQuotaCollectorReloadsProjectsFile(t *testing.T) {
 		return nil
 	}
 
-	if err := collector.Update(make(chan prometheus.Metric, 5)); err != nil {
+	if err := collector.Update(make(chan prometheus.Metric, 6)); err != nil {
 		t.Fatal(err)
 	}
-	if err := collector.Update(make(chan prometheus.Metric, 5)); err != nil {
+	if err := collector.Update(make(chan prometheus.Metric, 6)); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := reads, 2; got != want {
@@ -151,12 +154,28 @@ func TestXFSQuotaCollectorReadProjectsError(t *testing.T) {
 func TestXFSQuotaCollectorStatfsError(t *testing.T) {
 	collector := newTestXFSQuotaCollector()
 	expected := errors.New("statfs failed")
-	collector.statfs = func(string, *unix.Statfs_t) error {
-		return expected
+	collector.readProjectPaths = func(string) ([]xfsProjectPath, error) {
+		return []xfsProjectPath{
+			{id: 42, path: "/xfs/team-a"},
+			{id: 7, path: "/xfs/nested/team-b"},
+		}, nil
+	}
+	collector.statfs = func(path string, stats *unix.Statfs_t) error {
+		if path == rootfsFilePath("/xfs/team-a") {
+			return expected
+		}
+		*stats = unix.Statfs_t{Bsize: 4096}
+		return nil
 	}
 
-	if err := collector.Update(make(chan prometheus.Metric)); !errors.Is(err, expected) {
-		t.Fatalf("unexpected error: got %v, want %v", err, expected)
+	expectedMetrics := `# HELP node_xfs_quota_device_error Whether an error occurred while getting statistics for the given XFS project quota path.
+# TYPE node_xfs_quota_device_error gauge
+node_xfs_quota_device_error{device="/dev/sda1",device_error="statfs failed",path="/xfs/team-a"} 1
+node_xfs_quota_device_error{device="/dev/sdb1",device_error="",path="/xfs/nested/team-b"} 0
+`
+
+	if err := testutil.CollectAndCompare(testXFSQuotaCollector{collector}, strings.NewReader(expectedMetrics), "node_xfs_quota_device_error"); err != nil {
+		t.Fatal(err)
 	}
 }
 

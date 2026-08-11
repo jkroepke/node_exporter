@@ -48,6 +48,7 @@ type xfsQuotaCollector struct {
 	availDesc         typedDesc
 	filesDesc         typedDesc
 	filesFreeDesc     typedDesc
+	deviceErrorDesc   typedDesc
 }
 
 type xfsProjectPath struct {
@@ -62,7 +63,7 @@ func init() {
 // NewXFSQuotaCollector returns a new Collector exposing effective XFS project
 // quota filesystem statistics through statfs(2).
 func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
-	quotaLabelNames := []string{"device", "path"}
+	quotaLabelNames := []string{"device", "path", "device_error"}
 
 	return &xfsQuotaCollector{
 		logger:            logger,
@@ -110,6 +111,14 @@ func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
 				nil,
 			), valueType: prometheus.GaugeValue,
 		},
+		deviceErrorDesc: typedDesc{
+			desc: prometheus.NewDesc(
+				prometheus.BuildFQName(namespace, xfsQuotaSubsystem, "device_error"),
+				"Whether an error occurred while getting statistics for the given XFS project quota path.",
+				quotaLabelNames,
+				nil,
+			), valueType: prometheus.GaugeValue,
+		},
 	}, nil
 }
 
@@ -147,23 +156,28 @@ func (c *xfsQuotaCollector) Update(ch chan<- prometheus.Metric) error {
 
 		projectID := strconv.FormatUint(uint64(project.id), 10)
 		quotaKey := mount.device + "\x00" + project.path
-		if _, ok := emittedQuotas[quotaKey]; !ok {
-			stats := new(unix.Statfs_t)
-			if err := c.statfs(rootfsFilePath(project.path), stats); err != nil {
-				return fmt.Errorf("failed to retrieve XFS project quota for project %s at %q: %w", projectID, project.path, err)
-			}
-
-			labelValues := []string{mount.device, project.path}
-			blockSize := float64(stats.Bsize)
-			ch <- c.sizeDesc.mustNewConstMetric(float64(stats.Blocks)*blockSize, labelValues...)
-			ch <- c.freeDesc.mustNewConstMetric(float64(stats.Bfree)*blockSize, labelValues...)
-			ch <- c.availDesc.mustNewConstMetric(float64(stats.Bavail)*blockSize, labelValues...)
-			ch <- c.filesDesc.mustNewConstMetric(float64(stats.Files), labelValues...)
-			ch <- c.filesFreeDesc.mustNewConstMetric(float64(stats.Ffree), labelValues...)
-
-			emittedQuotas[quotaKey] = struct{}{}
-			found = true
+		if _, ok := emittedQuotas[quotaKey]; ok {
+			continue
 		}
+		emittedQuotas[quotaKey] = struct{}{}
+		found = true
+
+		stats := new(unix.Statfs_t)
+		if err := c.statfs(rootfsFilePath(project.path), stats); err != nil {
+			labelValues := []string{mount.device, project.path, err.Error()}
+			c.logger.Debug("Error on statfs() system call", "rootfs", rootfsFilePath(project.path), "project_id", projectID, "err", err)
+			ch <- c.deviceErrorDesc.mustNewConstMetric(1, labelValues...)
+			continue
+		}
+
+		labelValues := []string{mount.device, project.path, ""}
+		ch <- c.deviceErrorDesc.mustNewConstMetric(0, labelValues...)
+		blockSize := float64(stats.Bsize)
+		ch <- c.sizeDesc.mustNewConstMetric(float64(stats.Blocks)*blockSize, labelValues...)
+		ch <- c.freeDesc.mustNewConstMetric(float64(stats.Bfree)*blockSize, labelValues...)
+		ch <- c.availDesc.mustNewConstMetric(float64(stats.Bavail)*blockSize, labelValues...)
+		ch <- c.filesDesc.mustNewConstMetric(float64(stats.Files), labelValues...)
+		ch <- c.filesFreeDesc.mustNewConstMetric(float64(stats.Ffree), labelValues...)
 	}
 
 	if !found {
