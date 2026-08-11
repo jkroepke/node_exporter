@@ -31,8 +31,8 @@ const (
 	xfsQuotaBlockSize = 512
 
 	// XFS quota commands from include/uapi/linux/dqblk_xfs.h.
-	qXGetNextQuota        = ('X' << 8) + 9
-	xqmProjectQuota       = 2
+	qXGetNextQuota        = uintptr(('X' << 8) + 9)
+	xqmProjectQuota       = uintptr(2)
 	qXGetNextProjectQuota = (qXGetNextQuota << 8) | xqmProjectQuota
 )
 

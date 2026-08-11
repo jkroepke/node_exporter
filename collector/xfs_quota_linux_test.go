@@ -54,7 +54,7 @@ func TestXFSDiskQuotaLayout(t *testing.T) {
 }
 
 func TestXFSGetNextProjectQuotaCommand(t *testing.T) {
-	if got, want := qXGetNextProjectQuota, 0x580902; got != want {
+	if got, want := qXGetNextProjectQuota, uintptr(0x580902); got != want {
 		t.Fatalf("unexpected Q_XGETNEXTQUOTA command: got %#x, want %#x", got, want)
 	}
 }
