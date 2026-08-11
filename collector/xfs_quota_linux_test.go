@@ -87,6 +87,75 @@ node_xfs_quota_used_inodes{device="/dev/sda1",project_id="42"} 3
 	}
 }
 
+func TestXFSQuotaCollectorProjectInfo(t *testing.T) {
+	collector := newTestXFSQuotaCollector()
+	collector.projectInfoEnabled = true
+	collector.mountPointDetails = func(*slog.Logger) ([]filesystemLabels, error) {
+		return []filesystemLabels{
+			{device: "/dev/sda1", mountPoint: "/xfs", fsType: "xfs"},
+			{device: "/dev/sdb1", mountPoint: "/xfs/nested", fsType: "xfs"},
+		}, nil
+	}
+	collector.getNextProjectQuota = func(string, uint32) (xfsDiskQuota, error) {
+		return xfsDiskQuota{}, unix.ESRCH
+	}
+	collector.readProjectPaths = func(path string) ([]xfsProjectPath, error) {
+		if path != rootfsFilePath("/etc/projects") {
+			t.Fatalf("unexpected projects file: %q", path)
+		}
+		return []xfsProjectPath{
+			{id: 42, path: "/xfs/team-a"},
+			{id: 7, path: "/xfs/nested/team-b"},
+			{id: 7, path: "/xfs/nested/team-b"},
+			{id: 100, path: "/not-mounted"},
+		}, nil
+	}
+
+	expected := `# HELP node_xfs_quota_project_info Information about an XFS project path from /etc/projects.
+# TYPE node_xfs_quota_project_info gauge
+node_xfs_quota_project_info{device="/dev/sda1",path="/xfs/team-a",project_id="42"} 1
+node_xfs_quota_project_info{device="/dev/sdb1",path="/xfs/nested/team-b",project_id="7"} 1
+`
+
+	if err := testutil.CollectAndCompare(
+		testXFSQuotaCollector{collector},
+		strings.NewReader(expected),
+		"node_xfs_quota_project_info",
+	); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestParseXFSProjectPaths(t *testing.T) {
+	projects, err := parseXFSProjectPaths(strings.NewReader(`
+# project paths
+42:/xfs/team-a
+7: /xfs/team-b
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []xfsProjectPath{
+		{id: 42, path: "/xfs/team-a"},
+		{id: 7, path: "/xfs/team-b"},
+	}
+	if len(projects) != len(want) {
+		t.Fatalf("unexpected number of project paths: got %d, want %d", len(projects), len(want))
+	}
+	for i := range want {
+		if projects[i] != want[i] {
+			t.Errorf("unexpected project path %d: got %+v, want %+v", i, projects[i], want[i])
+		}
+	}
+}
+
+func TestParseXFSProjectPathsRejectsInvalidEntry(t *testing.T) {
+	if _, err := parseXFSProjectPaths(strings.NewReader("42:relative/path\n")); err == nil {
+		t.Fatal("expected an error for a relative project path")
+	}
+}
+
 func TestXFSQuotaCollectorEnumeratesEachDeviceOnce(t *testing.T) {
 	collector := newTestXFSQuotaCollector()
 	calls := []uint32{}
@@ -143,16 +212,21 @@ func TestXFSQuotaCollectorError(t *testing.T) {
 }
 
 func newTestXFSQuotaCollector() *xfsQuotaCollector {
-	return &xfsQuotaCollector{
-		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		mountPointDetails: func(*slog.Logger) ([]filesystemLabels, error) {
-			return []filesystemLabels{
-				{device: "/dev/sda1", mountPoint: "/xfs", fsType: "xfs"},
-				{device: "/dev/sda1", mountPoint: "/xfs-bind", fsType: "xfs"},
-				{device: "/dev/sdb1", mountPoint: "/ext4", fsType: "ext4"},
-			}, nil
-		},
-		getNextProjectQuota: func(device string, projectID uint32) (xfsDiskQuota, error) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	createdCollector, err := NewXFSQuotaCollector(logger)
+	if err != nil {
+		panic(err)
+	}
+	collector := createdCollector.(*xfsQuotaCollector)
+	collector.projectInfoEnabled = false
+	collector.mountPointDetails = func(*slog.Logger) ([]filesystemLabels, error) {
+		return []filesystemLabels{
+			{device: "/dev/sda1", mountPoint: "/xfs", fsType: "xfs"},
+			{device: "/dev/sda1", mountPoint: "/xfs-bind", fsType: "xfs"},
+			{device: "/dev/sdb1", mountPoint: "/ext4", fsType: "ext4"},
+		}, nil
+	}
+	collector.getNextProjectQuota = func(device string, projectID uint32) (xfsDiskQuota, error) {
 			if device != rootfsFilePath("/dev/sda1") {
 				return xfsDiskQuota{}, fmt.Errorf("unexpected device: %q", device)
 			}
@@ -168,6 +242,7 @@ func newTestXFSQuotaCollector() *xfsQuotaCollector {
 				InodeSoftLimit: 5,
 				InodeHardLimit: 7,
 			}, nil
-		},
 	}
+
+	return collector
 }
