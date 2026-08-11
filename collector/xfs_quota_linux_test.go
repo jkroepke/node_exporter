@@ -171,7 +171,7 @@ func TestXFSQuotaCollectorEnumeratesEachDeviceOnce(t *testing.T) {
 		case 43:
 			return xfsDiskQuota{ID: 100}, nil
 		default:
-			return xfsDiskQuota{}, unix.ESRCH
+			return xfsDiskQuota{}, unix.ENOENT
 		}
 	}
 

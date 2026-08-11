@@ -202,7 +202,7 @@ func (c *xfsQuotaCollector) Update(ch chan<- prometheus.Metric) error {
 		devicePath := rootfsFilePath(mount.device)
 		for projectID := uint32(0); ; {
 			quota, err := c.getNextProjectQuota(devicePath, projectID)
-			if errors.Is(err, unix.ESRCH) {
+			if errors.Is(err, unix.ENOENT) || errors.Is(err, unix.ESRCH) {
 				break
 			}
 			if err != nil {
