@@ -16,137 +16,198 @@
 package collector
 
 import (
-	"bufio"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
-	"os"
 	"strconv"
-	"strings"
+	"unsafe"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"golang.org/x/sys/unix"
 )
 
-const xfsQuotaSubsystem = "xfs_quota"
+const (
+	xfsQuotaSubsystem = "xfs_quota"
+	xfsQuotaBlockSize = 512
 
-var errXFSQuotaStatsNotFound = errors.New("XFS quota manager stats not found")
+	// XFS quota commands from include/uapi/linux/dqblk_xfs.h.
+	qXGetNextQuota        = ('X' << 8) + 9
+	xqmProjectQuota       = 2
+	qXGetNextProjectQuota = (qXGetNextQuota << 8) | xqmProjectQuota
+)
 
-type xfsQuotaStats struct {
-	dquotReclaims      uint32
-	dquotReclaimMisses uint32
-	dquotDuplicates    uint32
-	dquotCacheMisses   uint32
-	dquotCacheHits     uint32
-	dquotWants         uint32
-	dquots             uint32
-	unusedDquots       uint32
+// xfsDiskQuota matches struct fs_disk_quota from
+// include/uapi/linux/dqblk_xfs.h.
+type xfsDiskQuota struct {
+	Version                int8
+	Flags                  int8
+	FieldMask              uint16
+	ID                     uint32
+	BlockHardLimit         uint64
+	BlockSoftLimit         uint64
+	InodeHardLimit         uint64
+	InodeSoftLimit         uint64
+	BlockCount             uint64
+	InodeCount             uint64
+	InodeTimer             int32
+	BlockTimer             int32
+	InodeWarnings          uint16
+	BlockWarnings          uint16
+	InodeTimerHigh         int8
+	BlockTimerHigh         int8
+	RealtimeBlockTimerHigh int8
+	Padding2               int8
+	RealtimeBlockHardLimit uint64
+	RealtimeBlockSoftLimit uint64
+	RealtimeBlockCount     uint64
+	RealtimeBlockTimer     int32
+	RealtimeBlockWarnings  uint16
+	Padding3               int16
+	Padding4               [8]byte
 }
 
 type xfsQuotaCollector struct {
-	statsFile string
-	logger    *slog.Logger
+	logger              *slog.Logger
+	mountPointDetails   func(*slog.Logger) ([]filesystemLabels, error)
+	getNextProjectQuota func(string, uint32) (xfsDiskQuota, error)
 }
 
 func init() {
 	registerCollector("xfs_quota", defaultDisabled, NewXFSQuotaCollector)
 }
 
-// NewXFSQuotaCollector returns a new Collector exposing XFS quota manager statistics.
+// NewXFSQuotaCollector returns a new Collector exposing XFS project quotas.
 func NewXFSQuotaCollector(logger *slog.Logger) (Collector, error) {
 	return &xfsQuotaCollector{
-		statsFile: procFilePath("fs/xfs/stat"),
-		logger:    logger,
+		logger:              logger,
+		mountPointDetails:   mountPointDetails,
+		getNextProjectQuota: getNextXFSProjectQuota,
 	}, nil
-}
-
-func parseXFSQuotaStats(r io.Reader) (xfsQuotaStats, error) {
-	scanner := bufio.NewScanner(r)
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) == 0 || fields[0] != "qm" {
-			continue
-		}
-		if len(fields) != 9 {
-			return xfsQuotaStats{}, fmt.Errorf("unexpected number of XFS quota manager stats: %d", len(fields)-1)
-		}
-
-		values := make([]uint32, 8)
-		for i, field := range fields[1:] {
-			value, err := strconv.ParseUint(field, 10, 32)
-			if err != nil {
-				return xfsQuotaStats{}, fmt.Errorf("invalid XFS quota manager stat %q: %w", field, err)
-			}
-			values[i] = uint32(value)
-		}
-
-		return xfsQuotaStats{
-			dquotReclaims:      values[0],
-			dquotReclaimMisses: values[1],
-			dquotDuplicates:    values[2],
-			dquotCacheMisses:   values[3],
-			dquotCacheHits:     values[4],
-			dquotWants:         values[5],
-			dquots:             values[6],
-			unusedDquots:       values[7],
-		}, nil
-	}
-	if err := scanner.Err(); err != nil {
-		return xfsQuotaStats{}, err
-	}
-
-	return xfsQuotaStats{}, errXFSQuotaStatsNotFound
 }
 
 // Update implements Collector.
 func (c *xfsQuotaCollector) Update(ch chan<- prometheus.Metric) error {
-	file, err := os.Open(c.statsFile)
+	mounts, err := c.mountPointDetails(c.logger)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			c.logger.Debug("XFS quota manager statistics are unavailable", "err", err)
-			return ErrNoData
+		return fmt.Errorf("failed to retrieve mount points: %w", err)
+	}
+
+	devices := make(map[string]struct{})
+	found := false
+
+	for _, mount := range mounts {
+		if mount.fsType != "xfs" {
+			continue
 		}
-		return fmt.Errorf("failed to open XFS stats: %w", err)
-	}
-	defer file.Close()
+		if _, ok := devices[mount.device]; ok {
+			continue
+		}
+		devices[mount.device] = struct{}{}
 
-	stats, err := parseXFSQuotaStats(file)
-	if errors.Is(err, errXFSQuotaStatsNotFound) {
-		c.logger.Debug("XFS quota manager statistics are unavailable", "err", err)
+		devicePath := rootfsFilePath(mount.device)
+		for projectID := uint32(0); ; {
+			quota, err := c.getNextProjectQuota(devicePath, projectID)
+			if errors.Is(err, unix.ESRCH) {
+				break
+			}
+			if err != nil {
+				return fmt.Errorf("failed to retrieve XFS project quota for device %q: %w", mount.device, err)
+			}
+
+			c.updateXFSProjectQuota(ch, mount.device, quota)
+			found = true
+
+			if quota.ID == ^uint32(0) {
+				break
+			}
+			projectID = quota.ID + 1
+		}
+	}
+
+	if !found {
 		return ErrNoData
-	}
-	if err != nil {
-		return fmt.Errorf("failed to parse XFS quota manager stats: %w", err)
-	}
-
-	metrics := []struct {
-		name      string
-		help      string
-		value     uint32
-		valueType prometheus.ValueType
-	}{
-		{"dquot_reclaims_total", "Number of XFS dquots reclaimed.", stats.dquotReclaims, prometheus.CounterValue},
-		{"dquot_reclaim_misses_total", "Number of missed XFS dquot reclaim attempts.", stats.dquotReclaimMisses, prometheus.CounterValue},
-		{"dquot_duplicates_total", "Number of duplicate XFS dquots found.", stats.dquotDuplicates, prometheus.CounterValue},
-		{"dquot_cache_misses_total", "Number of XFS dquot cache misses.", stats.dquotCacheMisses, prometheus.CounterValue},
-		{"dquot_cache_hits_total", "Number of XFS dquot cache hits.", stats.dquotCacheHits, prometheus.CounterValue},
-		{"dquot_wants_total", "Number of XFS dquot wants.", stats.dquotWants, prometheus.CounterValue},
-		{"dquots", "Number of XFS dquots currently in core.", stats.dquots, prometheus.GaugeValue},
-		{"unused_dquots", "Number of unused XFS dquots on the freelist.", stats.unusedDquots, prometheus.GaugeValue},
-	}
-
-	for _, metric := range metrics {
-		ch <- prometheus.MustNewConstMetric(
-			prometheus.NewDesc(
-				prometheus.BuildFQName(namespace, xfsQuotaSubsystem, metric.name),
-				metric.help,
-				nil,
-				nil,
-			),
-			metric.valueType,
-			float64(metric.value),
-		)
 	}
 
 	return nil
+}
+
+func (c *xfsQuotaCollector) updateXFSProjectQuota(ch chan<- prometheus.Metric, device string, quota xfsDiskQuota) {
+	labels := []string{"device", "project_id"}
+	labelValues := []string{device, strconv.FormatUint(uint64(quota.ID), 10)}
+
+	metrics := []struct {
+		name  string
+		desc  string
+		value float64
+	}{
+		{
+			name:  "used_bytes",
+			desc:  "Number of bytes used by an XFS project quota.",
+			value: float64(quota.BlockCount) * xfsQuotaBlockSize,
+		},
+		{
+			name:  "soft_limit_bytes",
+			desc:  "Soft limit in bytes for an XFS project quota.",
+			value: float64(quota.BlockSoftLimit) * xfsQuotaBlockSize,
+		},
+		{
+			name:  "hard_limit_bytes",
+			desc:  "Hard limit in bytes for an XFS project quota.",
+			value: float64(quota.BlockHardLimit) * xfsQuotaBlockSize,
+		},
+		{
+			name:  "used_inodes",
+			desc:  "Number of inodes used by an XFS project quota.",
+			value: float64(quota.InodeCount),
+		},
+		{
+			name:  "soft_limit_inodes",
+			desc:  "Soft inode limit for an XFS project quota.",
+			value: float64(quota.InodeSoftLimit),
+		},
+		{
+			name:  "hard_limit_inodes",
+			desc:  "Hard inode limit for an XFS project quota.",
+			value: float64(quota.InodeHardLimit),
+		},
+	}
+
+	for _, metric := range metrics {
+		desc := prometheus.NewDesc(
+			prometheus.BuildFQName(namespace, xfsQuotaSubsystem, metric.name),
+			metric.desc,
+			labels,
+			nil,
+		)
+
+		ch <- prometheus.MustNewConstMetric(
+			desc,
+			prometheus.GaugeValue,
+			metric.value,
+			labelValues...,
+		)
+	}
+}
+
+func getNextXFSProjectQuota(device string, projectID uint32) (xfsDiskQuota, error) {
+	devicePointer, err := unix.BytePtrFromString(device)
+	if err != nil {
+		return xfsDiskQuota{}, err
+	}
+
+	quota := xfsDiskQuota{}
+	_, _, errno := unix.Syscall6(
+		unix.SYS_QUOTACTL,
+		qXGetNextProjectQuota,
+		uintptr(unsafe.Pointer(devicePointer)),
+		uintptr(projectID),
+		uintptr(unsafe.Pointer(&quota)),
+		0,
+		0,
+	)
+	if errno != 0 {
+		return xfsDiskQuota{}, errno
+	}
+
+	return quota, nil
 }

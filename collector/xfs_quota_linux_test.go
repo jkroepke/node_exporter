@@ -17,52 +17,157 @@ package collector
 
 import (
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"strings"
 	"testing"
+	"unsafe"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
+	"golang.org/x/sys/unix"
 )
 
-func TestParseXFSQuotaStats(t *testing.T) {
-	stats, err := parseXFSQuotaStats(strings.NewReader(`extent_alloc 1 2 3 4
-qm 10 11 12 13 14 15 16 17
-debug 0
-`))
-	if err != nil {
+type testXFSQuotaCollector struct {
+	collector *xfsQuotaCollector
+}
+
+func (c testXFSQuotaCollector) Collect(ch chan<- prometheus.Metric) {
+	_ = c.collector.Update(ch)
+}
+
+func (c testXFSQuotaCollector) Describe(ch chan<- *prometheus.Desc) {
+	prometheus.DescribeByCollect(c, ch)
+}
+
+func TestXFSDiskQuotaLayout(t *testing.T) {
+	if got, want := unsafe.Sizeof(xfsDiskQuota{}), uintptr(112); got != want {
+		t.Fatalf("unexpected fs_disk_quota size: got %d, want %d", got, want)
+	}
+	if got, want := unsafe.Offsetof(xfsDiskQuota{}.BlockHardLimit), uintptr(8); got != want {
+		t.Fatalf("unexpected block hard limit offset: got %d, want %d", got, want)
+	}
+	if got, want := unsafe.Offsetof(xfsDiskQuota{}.RealtimeBlockHardLimit), uintptr(72); got != want {
+		t.Fatalf("unexpected realtime block hard limit offset: got %d, want %d", got, want)
+	}
+}
+
+func TestXFSGetNextProjectQuotaCommand(t *testing.T) {
+	if got, want := qXGetNextProjectQuota, 0x580902; got != want {
+		t.Fatalf("unexpected Q_XGETNEXTQUOTA command: got %#x, want %#x", got, want)
+	}
+}
+
+func TestXFSQuotaCollector(t *testing.T) {
+	collector := newTestXFSQuotaCollector()
+
+	expected := `# HELP node_xfs_quota_hard_limit_bytes Hard limit in bytes for an XFS project quota.
+# TYPE node_xfs_quota_hard_limit_bytes gauge
+node_xfs_quota_hard_limit_bytes{device="/dev/sda1",project_id="42"} 4096
+# HELP node_xfs_quota_hard_limit_inodes Hard inode limit for an XFS project quota.
+# TYPE node_xfs_quota_hard_limit_inodes gauge
+node_xfs_quota_hard_limit_inodes{device="/dev/sda1",project_id="42"} 7
+# HELP node_xfs_quota_soft_limit_bytes Soft limit in bytes for an XFS project quota.
+# TYPE node_xfs_quota_soft_limit_bytes gauge
+node_xfs_quota_soft_limit_bytes{device="/dev/sda1",project_id="42"} 2048
+# HELP node_xfs_quota_soft_limit_inodes Soft inode limit for an XFS project quota.
+# TYPE node_xfs_quota_soft_limit_inodes gauge
+node_xfs_quota_soft_limit_inodes{device="/dev/sda1",project_id="42"} 5
+# HELP node_xfs_quota_used_bytes Number of bytes used by an XFS project quota.
+# TYPE node_xfs_quota_used_bytes gauge
+node_xfs_quota_used_bytes{device="/dev/sda1",project_id="42"} 1024
+# HELP node_xfs_quota_used_inodes Number of inodes used by an XFS project quota.
+# TYPE node_xfs_quota_used_inodes gauge
+node_xfs_quota_used_inodes{device="/dev/sda1",project_id="42"} 3
+`
+
+	if err := testutil.CollectAndCompare(testXFSQuotaCollector{collector}, strings.NewReader(expected)); err != nil {
 		t.Fatal(err)
 	}
+}
 
-	expected := xfsQuotaStats{
-		dquotReclaims:      10,
-		dquotReclaimMisses: 11,
-		dquotDuplicates:    12,
-		dquotCacheMisses:   13,
-		dquotCacheHits:     14,
-		dquotWants:         15,
-		dquots:             16,
-		unusedDquots:       17,
+func TestXFSQuotaCollectorEnumeratesEachDeviceOnce(t *testing.T) {
+	collector := newTestXFSQuotaCollector()
+	calls := []uint32{}
+	collector.getNextProjectQuota = func(device string, projectID uint32) (xfsDiskQuota, error) {
+		if device != rootfsFilePath("/dev/sda1") {
+			t.Fatalf("unexpected device: %q", device)
+		}
+		calls = append(calls, projectID)
+		switch projectID {
+		case 0:
+			return xfsDiskQuota{ID: 42}, nil
+		case 43:
+			return xfsDiskQuota{ID: 100}, nil
+		default:
+			return xfsDiskQuota{}, unix.ESRCH
+		}
 	}
-	if stats != expected {
-		t.Fatalf("unexpected XFS quota stats: got %+v, want %+v", stats, expected)
+
+	ch := make(chan prometheus.Metric, 12)
+	if err := collector.Update(ch); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(calls), 3; got != want {
+		t.Fatalf("unexpected number of quotactl calls: got %d, want %d", got, want)
+	}
+	for i, want := range []uint32{0, 43, 101} {
+		if calls[i] != want {
+			t.Errorf("unexpected project ID for call %d: got %d, want %d", i, calls[i], want)
+		}
 	}
 }
 
-func TestParseXFSQuotaStatsNotFound(t *testing.T) {
-	_, err := parseXFSQuotaStats(strings.NewReader("debug 0\n"))
-	if !errors.Is(err, errXFSQuotaStatsNotFound) {
-		t.Fatalf("unexpected error: got %v, want %v", err, errXFSQuotaStatsNotFound)
+func TestXFSQuotaCollectorNoData(t *testing.T) {
+	collector := newTestXFSQuotaCollector()
+	collector.mountPointDetails = func(*slog.Logger) ([]filesystemLabels, error) {
+		return []filesystemLabels{{device: "/dev/sda1", fsType: "ext4"}}, nil
+	}
+
+	if err := collector.Update(make(chan prometheus.Metric)); !IsNoDataError(err) {
+		t.Fatalf("unexpected error: got %v, want ErrNoData", err)
 	}
 }
 
-func TestParseXFSQuotaStatsInvalid(t *testing.T) {
-	tests := map[string]string{
-		"incorrect field count": "qm 1 2 3\n",
-		"non-numeric field":     "qm 1 2 3 4 5 invalid 7 8\n",
+func TestXFSQuotaCollectorError(t *testing.T) {
+	collector := newTestXFSQuotaCollector()
+	expected := errors.New("quotactl failed")
+	collector.getNextProjectQuota = func(string, uint32) (xfsDiskQuota, error) {
+		return xfsDiskQuota{}, expected
 	}
 
-	for name, input := range tests {
-		t.Run(name, func(t *testing.T) {
-			if _, err := parseXFSQuotaStats(strings.NewReader(input)); err == nil {
-				t.Fatal("expected an error, but none occurred")
+	if err := collector.Update(make(chan prometheus.Metric)); !errors.Is(err, expected) {
+		t.Fatalf("unexpected error: got %v, want %v", err, expected)
+	}
+}
+
+func newTestXFSQuotaCollector() *xfsQuotaCollector {
+	return &xfsQuotaCollector{
+		logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		mountPointDetails: func(*slog.Logger) ([]filesystemLabels, error) {
+			return []filesystemLabels{
+				{device: "/dev/sda1", mountPoint: "/xfs", fsType: "xfs"},
+				{device: "/dev/sda1", mountPoint: "/xfs-bind", fsType: "xfs"},
+				{device: "/dev/sdb1", mountPoint: "/ext4", fsType: "ext4"},
+			}, nil
+		},
+		getNextProjectQuota: func(device string, projectID uint32) (xfsDiskQuota, error) {
+			if device != rootfsFilePath("/dev/sda1") {
+				return xfsDiskQuota{}, fmt.Errorf("unexpected device: %q", device)
 			}
-		})
+			if projectID != 0 {
+				return xfsDiskQuota{}, unix.ESRCH
+			}
+			return xfsDiskQuota{
+				ID:                 42,
+				BlockCount:         2,
+				BlockSoftLimit:     4,
+				BlockHardLimit:     8,
+				InodeCount:         3,
+				InodeSoftLimit:     5,
+				InodeHardLimit:     7,
+			}, nil
+		},
 	}
 }
